@@ -208,7 +208,7 @@ Perfil de viagem: {st.session_state.perfil_viagem}.
 {system_extra}
 REGRAS:
 - Seja específico com nomes de lugares, restaurantes, hotéis e atrações reais
-- Sempre informe estimativas de custo em reais usando EXATAMENTE o símbolo R$ (não use R` ou R `)
+- REGRA CRÍTICA DE FORMATAÇÃO: sempre escreva R$30, R$120, R$1.500 — NUNCA escreva "R 30" ou "R 120" sem o cifrão. O símbolo correto é R$ colado ao número, sem espaço entre R e $.
 - Indique horários de funcionamento quando relevante
 - Dê dicas práticas que guias normais não dão
 - Escreva em português brasileiro natural e animado"""
@@ -220,14 +220,22 @@ REGRAS:
             model="openai/gpt-oss-120b",
         )
         txt = response.choices[0].message.content
-        # Corrige cifrão quebrado gerado pelo modelo
+        # Corrige cifrão quebrado gerado pelo modelo — múltiplos padrões
         import re as _re
-        txt = _re.sub(r'R\s*[`\'´`]\s*(\d)', r'R$\1', txt)
-        txt = _re.sub(r'R\s*[`\'´`]\s*([A-Z])', r'R$ \1', txt)
+        # R` R' R´ R` seguido de número
+        txt = _re.sub(r'R\s*[`\'´\u0060]\s*(\d)', r'R$\1', txt)
+        txt = _re.sub(r'R\s*[`\'´\u0060]\s*([A-Z])', r'R$ \1', txt)
         txt = txt.replace('R` ', 'R$').replace('R`', 'R$')
         txt = txt.replace("R' ", 'R$').replace("R'", 'R$')
         txt = txt.replace('R´ ', 'R$').replace('R´', 'R$')
-        txt = _re.sub(r'\bR\b\s+(\d)', r'R$\1', txt)  # "R 80" → "R$80"
+        # "R 80" → "R$80" (R sozinho seguido de espaço e número)
+        txt = _re.sub(r'\bR\b\s+(\d)', r'R$\1', txt)
+        # "R 30,50" ou "R 120.000"
+        txt = _re.sub(r'\bR\s+(\d[\d.,]*)', r'R$\1', txt)
+        # Markdown bold quebrado: **R 30** → **R$30**
+        txt = _re.sub(r'\*\*R\s+(\d)', r'**R$\1', txt)
+        # "R 30 50" sem cifrão (dois números juntos com R na frente)
+        txt = _re.sub(r'\bR\b\s*(?!\$)(\d)', r'R$\1', txt)
         return txt
     except Exception as e:
         return f"⚠️ Erro na API: {e}"
@@ -1562,21 +1570,24 @@ elif st.session_state.etapa == "App":
             if pais_arm.strip():
                 with st.spinner(f"Pesquisando micos em {pais_arm}..."):
                     prompt = (
-                        f"Crie um guia completo de palavras, expressões e comportamentos que são normais para "
-                        f"brasileiros mas que podem ser ofensivos, obscenos ou constrangedores em {pais_arm}.\n\n"
-                        f"SEJA ESPECÍFICO E HONESTO — este guia existe justamente para evitar micos reais.\n\n"
-                        f"FORMATO:\n\n"
-                        f"🚫 PALAVRAS ARMADILHA — BRASIL → {pais_arm.upper()}\n\n"
-                        f"📖 INTRODUÇÃO:\n"
-                        f"[1 parágrafo explicando por que isso acontece — diferenças históricas, evolução dos idiomas, colonização, etc.]\n\n"
-                        f"⚠️ PALAVRAS DO PORTUGUÊS BRASILEIRO QUE CAUSAM PROBLEMA:\n\n"
-                        f"Para cada palavra/expressão use este formato:\n"
-                        f"🔴 **[PALAVRA EM PORTUGUÊS]**\n"
-                        f"• O que significa para nós: [definição normal/inocente em pt-BR]\n"
-                        f"• O que significa lá: [o que aquela palavra significa ou soa em {pais_arm}]\n"
-                        f"• Nível de constrangimento: [leve 😅 / moderado 😬 / grave 😱]\n"
-                        f"• Como evitar: [palavra substituta ou jeito certo de falar]\n\n"
-                        f"[Inclua pelo menos 12-15 exemplos reais e conhecidos]\n\n"
+                        f"Crie um guia de ARMADILHAS LINGUÍSTICAS entre o português brasileiro e {pais_arm}.\n\n"
+                        f"OBJETIVO: Mostrar palavras que causam CHOQUE ou CONFUSÃO porque têm significados OPOSTOS ou MUITO DIFERENTES nos dois lugares.\n\n"
+                        f"DOIS TIPOS DE ARMADILHA:\n"
+                        f"1. Palavra normal no Brasil que é ofensiva/estranha em {pais_arm}\n"
+                        f"2. Palavra normal em {pais_arm} que choca ou confunde o brasileiro\n\n"
+                        f"EXEMPLOS DO TIPO CERTO (para Portugal):\n"
+                        f"- BICHA: no Brasil = gíria pejorativa para gay | em Portugal = fila de espera (normal). Armadilha: brasileiro se choca quando português diz 'entre na bicha'\n"
+                        f"- RAPARIGA: no Brasil = prostituta | em Portugal = moça/garota (normal). Armadilha: brasileira se ofende quando chamada de rapariga\n"
+                        f"- FIXE: no Brasil = não usado | em Portugal = legal/ótimo. Armadilha: brasileiro não entende\n\n"
+                        f"FORMATO para cada palavra:\n"
+                        f"🔴 **[PALAVRA]**\n"
+                        f"• No Brasil significa: [significado real atual no pt-BR]\n"
+                        f"• Em {pais_arm} significa: [significado real lá]\n"
+                        f"• A armadilha: [situação concreta onde o choque acontece]\n"
+                        f"• Nível: [leve 😅 / moderado 😬 / grave 😱]\n"
+                        f"• Como evitar: [solução prática]\n\n"
+                        f"Inclua pelo menos 15 exemplos reais divididos nos dois tipos.\n"
+                        f"Destino: {pais_arm}\n\n"
                     )
                     if incluir_gestos:
                         prompt += (
@@ -1608,8 +1619,13 @@ elif st.session_state.etapa == "App":
                 st.warning("Informe o país de destino.")
 
         if st.session_state.get('armadilha_temp'):
-            st.markdown(f"<div class='card-orange'>{st.session_state['armadilha_temp']}</div>",
-                unsafe_allow_html=True)
+            st.markdown("""
+            <div style='background:linear-gradient(135deg,#FFF5F5,#FFE4E4);
+            border:2px solid #FC8181;border-radius:16px;padding:6px 20px;margin:12px 0;'>
+            <div style='font-size:0.8em;font-weight:700;color:#C53030;margin-bottom:4px;'>
+            🚫 GUIA DE ARMADILHAS LINGUÍSTICAS</div>
+            </div>""", unsafe_allow_html=True)
+            st.markdown(st.session_state['armadilha_temp'])
             col_dl, col_sv = st.columns(2)
             with col_dl:
                 st.download_button("📋 Baixar (.txt)",
@@ -1723,8 +1739,13 @@ elif st.session_state.etapa == "App":
                 st.warning("Informe o país de destino.")
 
         if st.session_state.get('pessoas_temp'):
-            st.markdown(f"<div class='card'>{st.session_state['pessoas_temp']}</div>",
-                unsafe_allow_html=True)
+            st.markdown("""
+            <div style='background:linear-gradient(135deg,#F0FDF4,#DCFCE7);
+            border:2px solid #86EFAC;border-radius:16px;padding:6px 20px;margin:12px 0;'>
+            <div style='font-size:0.8em;font-weight:700;color:#166534;margin-bottom:4px;'>
+            🤝 GUIA DE RELACIONAMENTO SOCIAL</div>
+            </div>""", unsafe_allow_html=True)
+            st.markdown(st.session_state['pessoas_temp'])
             col_dl, col_sv = st.columns(2)
             with col_dl:
                 st.download_button("📋 Baixar (.txt)",
